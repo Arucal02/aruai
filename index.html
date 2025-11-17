@@ -238,7 +238,7 @@
     <!-- 底部信息 -->
     <footer class="text-center text-gray-500 text-sm mt-12">
       <p>ES麻将役种查询助手 © 2025</p>
-      <p>制作：xhs账号-yuovo；Github@ Arucal02</p>
+      <p>制作：xhs账号-yuovo；Github@Arucal02</p>
       <p>素材及规则来源：偶像梦幻祭2 & Happy elements K.K</p>
       <p>特别鸣谢：麻友-喜欢涟纯的小黄老师提供的规则书整理</p>
               <p>小红书-10378083769-对麻将入门玩法的翻译</p>
@@ -286,6 +286,9 @@
         renderSelectedMembers();
         console.log('已添加成员:', member);
         console.log('当前已选成员列表:', selectedMembersList);
+        
+        // 自动触发搜索，更新推荐内容
+        search();
       }
     }
     
@@ -645,9 +648,9 @@
                     <p class="text-sm text-gray-600 mb-1">建议移除:</p>
                     <div class="flex flex-wrap">
                       ${winningSuggestion.removeMembers.map(member => `
-                        <span class="bg-danger/10 text-danger px-2 py-1 rounded-full text-xs mr-1 mb-1 flex items-center">
+                        <span class="bg-danger/10 text-danger px-2 py-1 rounded-full text-xs mr-1 mb-1 flex items-center cursor-pointer hover:bg-danger/20 transition-colors">
                           ${member}
-                          <i class="fa fa-times-circle ml-1"></i>
+                          <i class="fa fa-times-circle ml-1" onclick="removeMember('${member}');search();"></i>
                         </span>
                       `).join('')}
                     </div>
@@ -656,16 +659,37 @@
                     <p class="text-sm text-gray-600 mb-1">建议抓取:</p>
                     <div class="flex flex-wrap">
                       ${winningSuggestion.addMembers.map(member => `
-                        <span class="bg-success/10 text-success px-2 py-1 rounded-full text-xs mr-1 mb-1 flex items-center">
+                        <span class="bg-success/10 text-success px-2 py-1 rounded-full text-xs mr-1 mb-1 flex items-center cursor-pointer hover:bg-success/20 transition-colors">
                           ${member}
-                          <i class="fa fa-plus-circle ml-1"></i>
+                          <i class="fa fa-plus-circle ml-1" onclick="addMember('${member}');search();"></i>
                         </span>
                       `).join('')}
                     </div>
                   </div>
+                  ${winningSuggestion.newlyCompletedCombination ? `
+                  <div class="bg-success/10 p-3 rounded-lg">
+                    <p class="text-sm text-gray-600 mb-2">替换后可达成的役种:</p>
+                    <div class="bg-white/80 p-2 rounded-lg border border-success/20">
+                      <div class="flex justify-between items-center mb-1">
+                        <span class="font-medium text-success">${winningSuggestion.newlyCompletedCombination.name}</span>
+                        <span class="bg-success/20 text-success px-2 py-0.5 rounded-full text-xs">+${winningSuggestion.newlyCompletedCombination.score}分</span>
+                      </div>
+                      <div class="flex flex-wrap">
+                        ${winningSuggestion.newlyCompletedCombination.completedMembers.map(member => `
+                          <span class="bg-success/10 text-success px-1.5 py-0.5 rounded-full text-xs mr-1 mb-1">
+                            ${member}
+                          </span>
+                        `).join('')}
+                      </div>
+                    </div>
+                  </div>
+                  ` : ''}
                   <p class="text-sm text-gray-500 mt-2">
-                    替换后可达成 <span class="font-medium text-primary">${winningSuggestion.newScore}</span> 分的胡牌组合
-                  </p>
+                      ${winningSuggestion.replaceCombination ? 
+                        `替换「${winningSuggestion.replaceCombination}」后可达成 ` : 
+                        '替换后可达成 '}
+                      <span class="font-medium text-primary">${winningSuggestion.newScore}</span> 分的胡牌组合
+                    </p>
                 </div>
               </div>
             `;
@@ -799,7 +823,7 @@
       return memberScores;
     }
     
-    // 生成胡牌建议
+    // 生成胡牌建议 - 基于目标胡牌结果计算移除建议
     function generateWinningSuggestion(combinations) {
       // 定义事务所特殊单位和团体LOGO
       const officeUnits = ['STAR PRO', 'NEW DIMENSION', 'COSMIC PRODUCTION', 'Rhythm Link（李子林）'];
@@ -808,52 +832,189 @@
       // 找出所有已凑齐的役种
       const completedCombinations = combinations.filter(c => c.isCompleted);
       
-      // 找出所有接近凑齐的役种（已凑齐2人）
-      const nearCompletedCombinations = combinations.filter(c => c.completedCount === 2);
+      // 找出所有已使用的成员（在已凑齐役种中的成员）
+      const usedMembers = new Set();
+      completedCombinations.forEach(c => {
+        c.completedMembers.forEach(member => usedMembers.add(member));
+      });
       
-      // 如果有接近凑齐的役种，尝试找出可以替换的成员
-      if (nearCompletedCombinations.length > 0) {
-        // 按加分降序排列
-        nearCompletedCombinations.sort((a, b) => b.score - a.score);
+      // 计算当前总分
+      const currentScore = completedCombinations.reduce((sum, c) => sum + c.score, 0);
+      
+      // 输出调试信息
+      console.log('当前选择的成员列表:', selectedMembersList);
+      console.log('已凑齐役种中的成员:', Array.from(usedMembers));
+      console.log('当前总分:', currentScore);
+      
+      // 生成所有可能的目标胡牌方案
+      const potentialTargets = [];
+      
+      // 1. 找出所有可以通过添加1-2个成员完成的高分役种
+      const highScoreCombinations = combinations
+        .filter(c => !c.isCompleted && c.score > 5)
+        .sort((a, b) => b.score - a.score);
+      
+      for (const combination of highScoreCombinations) {
+        // 检查是否与已凑齐役种有成员重叠
+        const hasOverlap = combination.completedMembers.some(m => usedMembers.has(m));
         
-        // 尝试每个接近凑齐的役种
-        for (const combination of nearCompletedCombinations) {
-          // 需要的成员
-          const neededMember = combination.pendingMembers[0];
+        // 计算当前役种中已有的成员
+        const existingMembers = combination.completedMembers.filter(m => selectedMembersList.includes(m));
+        
+        // 计算还需要添加的成员
+        const neededMembers = combination.pendingMembers.filter(m => 
+          !selectedMembersList.includes(m) && (!hasOverlap || !usedMembers.has(m))
+        );
+        
+        // 只考虑需要添加1-2个成员的情况
+        if (neededMembers.length > 0 && neededMembers.length <= 2) {
+          // 计算完成这个役种后的潜在分数
+          let potentialScore = currentScore;
+          if (hasOverlap) {
+            // 如果有重叠，需要找到重叠的役种并减去其分数
+            const overlappingCombinations = completedCombinations.filter(c => 
+              c.completedMembers.some(m => combination.completedMembers.includes(m))
+            );
+            overlappingCombinations.forEach(c => {
+              potentialScore -= c.score;
+            });
+          }
+          potentialScore += combination.score;
           
-          // 检查添加这个成员后是否符合事务所特殊单位规则
+          // 检查是否符合事务所特殊单位规则
           let meetsOfficeRule = true;
-          const tempCompletedMembers = [...combination.completedMembers, neededMember];
-          const hasOfficeUnit = tempCompletedMembers.some(m => officeUnits.includes(m));
-          const hasGroupLogo = tempCompletedMembers.some(m => groupLogos.includes(m.toLowerCase()) || groupLogos.includes(m));
-          
-          if (hasOfficeUnit && !hasGroupLogo) {
+          if (combination.completedMembers.some(m => officeUnits.includes(m)) &&
+              !combination.completedMembers.some(m => groupLogos.includes(m.toLowerCase()) || groupLogos.includes(m))) {
             meetsOfficeRule = false;
           }
           
-          // 只有符合规则的役种才生成胡牌建议
           if (meetsOfficeRule) {
-            // 找出可以移除的成员（不在已凑齐役种中的成员）
-            const removableMembers = selectedMembersList.filter(member => {
-              // 检查成员是否在已凑齐的役种中
-              const inCompletedCombination = completedCombinations.some(c => 
-                c.completedMembers.includes(member)
-              );
-              
-              return !inCompletedCombination && !combination.completedMembers.includes(member);
+            potentialTargets.push({
+              combination: combination,
+              neededMembers: neededMembers,
+              potentialScore: potentialScore,
+              overlapWithExisting: hasOverlap,
+              existingMembers: existingMembers
             });
-            
-            if (removableMembers.length > 0) {
-              // 计算替换后的总分
-              const currentScore = completedCombinations.reduce((sum, c) => sum + c.score, 0);
-              const newScore = currentScore + combination.score;
-              
-              return {
-                removeMembers: [removableMembers[0]],
-                addMembers: [neededMember],
-                newScore: newScore
-              };
+          }
+        }
+      }
+      
+      // 按潜在分数降序排序
+      potentialTargets.sort((a, b) => b.potentialScore - a.potentialScore);
+      
+      console.log('潜在的胡牌目标方案:', potentialTargets);
+      
+      // 遍历每个潜在目标，计算最优的移除建议
+      for (const target of potentialTargets) {
+        const { combination, neededMembers, overlapWithExisting, existingMembers } = target;
+        
+        // 计算需要移除的成员数量
+        const requiredRemovals = neededMembers.length;
+        
+        // 找出所有可以移除的成员，并按优先级排序
+        // 优先级：
+        // 1. 无用成员（不在任何已凑齐役种和目标役种中的成员）
+        // 2. 如果有重叠，重叠役种中的成员
+        // 3. 其他成员
+        
+        // 确定需要保留的成员：已凑齐役种中的非重叠成员 + 目标役种中的现有成员
+        const membersToKeep = new Set();
+        
+        // 添加非重叠的已凑齐役种成员
+        if (overlapWithExisting) {
+          completedCombinations.forEach(c => {
+            // 只保留不与目标役种重叠的役种成员
+            const isOverlapping = c.completedMembers.some(m => combination.completedMembers.includes(m));
+            if (!isOverlapping) {
+              c.completedMembers.forEach(m => membersToKeep.add(m));
             }
+          });
+        } else {
+          // 如果没有重叠，保留所有已凑齐役种成员
+          usedMembers.forEach(m => membersToKeep.add(m));
+        }
+        
+        // 添加目标役种中的现有成员
+        existingMembers.forEach(m => membersToKeep.add(m));
+        
+        // 找出可移除的成员，并分类
+        const removableMembers = [];
+        
+        // 1. 无用成员（不在需要保留的集合中）
+        const uselessMembers = selectedMembersList.filter(m => !membersToKeep.has(m));
+        removableMembers.push(...uselessMembers);
+        
+        // 2. 如果有重叠，添加重叠役种中的成员（但不在目标役种中）
+        if (overlapWithExisting) {
+          const overlappingMembers = selectedMembersList.filter(m => 
+            usedMembers.has(m) && 
+            combination.completedMembers.includes(m) && 
+            !existingMembers.includes(m)
+          );
+          removableMembers.push(...overlappingMembers);
+        }
+        
+        console.log(`目标役种${combination.name}的保留成员:`, Array.from(membersToKeep));
+        console.log(`目标役种${combination.name}的可移除成员:`, removableMembers);
+        
+        // 检查是否有足够的可移除成员
+        if (removableMembers.length >= requiredRemovals) {
+          // 选择前requiredRemovals个可移除成员
+          const membersToRemove = removableMembers.slice(0, requiredRemovals);
+          
+          // 模拟替换后的成员列表
+          let tempMembers = [...selectedMembersList];
+          
+          // 移除成员
+          membersToRemove.forEach(member => {
+            const index = tempMembers.indexOf(member);
+            if (index !== -1) {
+              tempMembers.splice(index, 1);
+            }
+          });
+          
+          // 添加需要的成员
+          tempMembers = [...tempMembers, ...neededMembers];
+          
+          // 验证是否能完成目标役种
+          const canComplete = combination.completedMembers.every(m => tempMembers.includes(m));
+          
+          if (canComplete) {
+            // 计算实际的新分数（考虑可能的组合）
+            const newCombinations = [];
+            const newUsedMembers = new Set();
+            
+            // 先添加非重叠的已凑齐役种
+            if (overlapWithExisting) {
+              completedCombinations.forEach(c => {
+                const isOverlapping = c.completedMembers.some(m => combination.completedMembers.includes(m));
+                if (!isOverlapping) {
+                  newCombinations.push(c);
+                  c.completedMembers.forEach(m => newUsedMembers.add(m));
+                }
+              });
+            } else {
+              completedCombinations.forEach(c => {
+                newCombinations.push(c);
+                c.completedMembers.forEach(m => newUsedMembers.add(m));
+              });
+            }
+            
+            // 添加新完成的役种
+            newCombinations.push(combination);
+            combination.completedMembers.forEach(m => newUsedMembers.add(m));
+            
+            // 计算新分数
+            const newScore = newCombinations.reduce((sum, c) => sum + c.score, 0);
+            
+            return {
+              removeMembers: membersToRemove,
+              addMembers: neededMembers,
+              newScore: newScore,
+              newlyCompletedCombination: combination,
+              replaceCombination: overlapWithExisting ? "部分现有役种" : undefined
+            };
           }
         }
       }
